@@ -1,0 +1,672 @@
+---
+title: "Correction Confusion"
+author: "Brian"
+date: "4/24/2023"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r libraries, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(snotelr)
+library(riem)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(dataRetrieval)
+library(lubridate)
+library(sf)
+library(ggthemes)
+library(xts)
+library(dygraphs)
+library(scales)
+library(openair)
+library(plotly)
+library(SciViews)
+knitr::opts_chunk$set(message = F, 
+                      warning = F,
+                      cache = T)
+knitr::opts_chunk$set(echo = TRUE)
+library(trend)
+library(nhdplusTools)
+#library(lfstat) No longer supported?
+library(ggpubr)
+library(kableExtra)
+#Stats
+library(forcats)
+library(stringr)
+library(trend)
+# COOP/ Did not work- seems to be limited to coastal areas
+#library(rnoaa)
+```
+
+
+# Disclaimer 
+
+*This work is very preliminary as I get back into the coding swing of things. Data wrangling and figure generation will be done via R, but the rest of the project will be done using good ol' microsoft products. This is just an entry point into data crunching and should by no means be considered a final product.*
+
+*Also, I'm not great at this but whatever. I could automate this, but I'll figure that out shortly!*
+
+# Methodology
+
+SNOTEL data was provided by the NRCS. Data was cleaned by removing outliers that are likely implausible; any year with more than 15 observations missing was removed. Temperatures were adjusted using the Morrisey method for stations identified by Ma et al (2019) due to SNOTEL temperature sensor changes, with the adjustment applied to pre-sensor change data. Daily mean observations were detrended to determine whether values were increasing or decreasing from the entire time series trend. Daily mean temperatures were first averaged by water year, with all water year means then averaged by day of water year. The mean temperature by day for the period of record was averaged. To find the standard deviation, the daily mean temperatures by water year was subtracted from the averaged mean temperature by day for the period of record. All water year means averaged by day of water year were subtracted from the temperature mean. The resulting values were then added together to find the “residual” of the daily mean temperatures by water year. The standard deviation was then computed from those residuals, with trends analyzed by Mann‐Kendall significance test and Theil‐Sen's rate of change. Significant trends are identified with p-values of less than 0.10.
+
+Morrisey Method
+
+The Morrisey Method is taken from [Ma, Fassnacht and Kampf.](https://agupubs.onlinelibrary.wiley.com/doi/epdf/10.1029/2019WR025921). 
+
+In R script: T(adjusted) = 5.3x10^(-7)xT(old)^4+3.72x10^(-5)xT(old)^3-2.16x10^(-3)xT(old)^2-7.32x10^(-2)xT(old)+1.37
+
+**In the Ma et al. spreadsheet, H1 is Morrisey, H2 is Oiler**
+
+# 4/24/2023 update
+Including YSI temperature sensor bias equation from Joel Atwood at the Colorado Snow Survey, presented at the 2023 Western Snow Conference. Associated website [here.](https://www.nrcs.usda.gov/wps/portal/wcc/home/snowClimateMonitoring/temperature/temperatureBiasCorrection/)
+
+```{r conditional_block, echo=FALSE}
+print("610558.226380138*(((T_(bias-c)+65.929))/194.45)^9- 2056177.65461394*(((T_(bias-c)+65.929))/194.45)^8+ 2937046.42906361*(((T_(bias-c)+65.929))/194.45)^7-2319657.12916417*(((T_(bias-c)+65.929))/194.45)^6+1111854.33825836*(((T_(bias-c)+65.929))/194.45)^5-337069.883250001*(((T_(bias-c)+65.929))/194.45)^4+66105.7015922199*(((T_(bias-c)+65.929))/194.45)^3- 8386.78320604513*(((T_(bias-c)+65.929))/194.45)^2+ 824.818021779729*(((T_(bias-c)+65.929))/194.45)-86.7321006757439= T_c")
+```
+
+# Corrections
+
+This Rmarkdown will look at five different datasets originally collected by the Crosho SNOTEL station, as it has the largest number of usable water years' worth of data and it was selected by Ma et al (2019) as the Morrisey correction having the largest NSCE and smallest bias. While it's listed below, the Oyler dataset is not used in this analysis.
+
+There are five datasets:
+1) NRCS pre-sensor change data (not adjusted)
+2) NRCS pre-sensor change adjusted data (Morrisey)
+3) NRCS pre-sensor change adjusted data (Oyler)
+4) NRCS post-sensor change adjusted data (NOAA9/CONUS)
+5) NRCE pre & post sensor change adjusted data (NOAA9/CONUS over Morrisey)
+
+### data read-in
+
+```{read in Crosho SNOTELr,eval=FALSE, include=TRUE}
+SNOTEL_426 <- snotel_download(site_id = 426, path = tempdir('../data'), internal = TRUE)
+write.csv(SNOTEL_426,"C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_raw/snotel_426.csv", row.names = FALSE) #write in the raw data
+```
+
+```{r Crosho read in}
+snotel_426 <- read.csv("C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_raw/snotel_426.csv", header = TRUE)
+```
+
+### Crosho	426 
+*Morrisey* 7/21/2005
+
+```{r 426 clean & water year & day }
+#str(snotel_426) # check the date, usually a character.  
+
+snotel_426$Date <- as.Date(snotel_426$date) #change date from character to date format, capitalize to work with Water year functon from NWIS.
+
+#THIS WILL CHANGE FOR EACH STATION
+snotel_426_clean <- snotel_426 %>% # filter for the timeframe
+  filter(Date >= "1979-10-01" & Date <= "2022-09-30") %>%
+  #filter(temperature_mean >= -30 & temperature_mean <= 20) %>% # removing outliers   
+  addWaterYear() %>% 
+  mutate(daymonth = format(as.Date(Date), "%d-%m")) %>% 
+  na.omit()
+
+#adding water day using difftime (SUPER COOL. example from [this](https://stackoverflow.com/questions/48123049/create-day-index-based-on-water-year))
+
+snotel_426_clean <- snotel_426_clean %>% 
+  group_by(waterYear)%>% 
+  mutate(waterDay = (as.integer(difftime(Date, ymd(paste0(waterYear - 1 ,'-09-30')), units = "days"))))
+
+```
+
+
+```{r 426 plot check }
+
+# Check for outliers
+
+ggplot(snotel_426_clean, aes(x = Date, y = temperature_mean)) +
+  geom_point() + #lwd = 2) +
+  theme_few() +
+  geom_smooth(method = "lm", se=FALSE) +
+  ylab('Daily temperature (°C)') + 
+  xlab('Date')
+
+
+# For SF average annual temp
+sf <- snotel_426_clean %>% 
+  group_by(waterYear) %>% 
+  mutate(anntemp = mean(temperature_mean)) %>% 
+  distinct(anntemp)
+
+ggplot(sf, aes(x=waterYear, y= anntemp))+
+  geom_point()+
+  geom_smooth(method = "lm", se=TRUE)+
+  theme_few()
+
+```
+
+
+```{r 426 trying to clean outliers}
+
+
+
+snotel_426_clean <- snotel_426_clean %>% 
+  mutate(temp_diff = abs(temperature_min - temperature_max)) %>% 
+  filter(temperature_mean > -50) %>% 
+  filter(temp_diff < 40)
+
+```
+
+
+```{r 426 temp difference}
+
+ggplot(snotel_426_clean, aes(x = Date, y = temp_diff)) + 
+  geom_point() + #lwd = 2) +
+  theme_few() +
+  #geom_smooth(method = "lm", se=FALSE) +
+  ylab('Daily temperature varience (°C)') + 
+  xlab('Date')
+
+```
+
+Per Steven's advice: :If there are more than 15 missing days, then...remove that year"
+
+```{r 426 cull selection}
+
+# filtering for temperature anomalies
+#snotel_426_cull_count <- snotel_426_clean %>% 
+#  filter(temperature_min > -40) %>% 
+#  count(waterYear)
+
+#snotel_426_cull_count
+
+# filtering for too few observations in a year
+snotel_426_cull_count_days <- snotel_426_clean %>% 
+  group_by(waterYear) %>% 
+  count(waterYear) %>% 
+  filter(n < 350)
+
+snotel_426_cull_count_days
+
+```
+
+```{r 426 cull}
+
+snotel_426_clean_culled <- snotel_426_clean %>% 
+  filter(waterYear != "1988" & waterYear != "1989" & waterYear != "2009" & waterYear != "2021")# & waterYear != "2022")# & waterYear != "1986" & waterYear != "1987" & waterYear != "1994" & waterYear != "2002")# & waterYear != "2002" & waterYear != "2016" & waterYear != "2022")# & waterYear != "2017") #%>% 
+  #filter(temperature_mean > -49)
+
+ggplot(snotel_426_clean_culled, aes(x = Date, y = temp_diff)) + 
+  geom_point() + #lwd = 2) +
+  theme_few() +
+  #geom_smooth(method = "lm", se=FALSE) +
+  ylab('Daily temperature varience (°C)') + 
+  xlab('Date')
+
+```
+
+```{r 426 culled plot}
+
+ggplot(snotel_426_clean_culled, aes(x = Date, y = temperature_mean)) + 
+  geom_point() + #lwd = 2) +
+  theme_few() +
+  geom_smooth(method = "lm", se=FALSE) +
+  ylab('Daily temperature (°C)') + 
+  xlab('Date')
+
+
+temp_426_xts <- xts(snotel_426_clean_culled$temperature_mean, order.by = snotel_426_clean_culled$Date)
+
+dygraph(temp_426_xts) %>%
+  dyAxis("y", label = "Daily mean temperature (°C)") 
+
+#snotel_426_clean_culled <- snotel_426_clean_culled %>% 
+#  filter(temperature_mean > -30)
+
+#temp_426_xts <- xts(snotel_426_clean_culled$temperature_mean, order.by = snotel_426_clean_culled$Date)
+
+#dygraph(temp_426_xts) %>%
+#  dyAxis("y", label = "Daily mean temperature (°C)") 
+
+
+```
+
+### adjusted 
+Crosho	426 *Morrisey* 7/21/2005
+
+Need four datasets:
+
+1) NRCS pre-sensor change data (not adjusted) *"temperature_mean"*
+2) NRCS pre-sensor change adjusted data (Morrisey) *"morrisey"* 
+4) NRCS post-sensor change adjusted data (NOAA9/CONUS) *"noaa_conus"*
+5) NRCE pre & post sensor change adjusted data (NOAA9/CONUS over Morrisey) *"noaa_morrisey"*
+
+```{r 426 adj}
+# 2) NRCS pre-sensor change adjusted data (Morrisey) *"morrisey"* 
+
+snotel_426_adjusted <- snotel_426_clean_culled %>%
+  mutate(morrisey = if_else(Date < "2005-07-21", ((5.3*10^(-7))*(temperature_mean^(4))+(3.72*10^(-5))*(temperature_mean^(3))-(2.16*10^(-3))*(temperature_mean^(2))-(7.32*10^(-2))*(temperature_mean)+1.37)+temperature_mean, temperature_mean)) %>% 
+  mutate(noaa_conus = if_else(Date >= "2005-07-21", 610558.226380138*(((temperature_mean+65.929))/194.45)^9-2056177.65461394*(((temperature_mean+65.929))/194.45)^8+2937046.42906361*(((temperature_mean+65.929))/194.45)^7-2319657.12916417*(((temperature_mean+65.929))/194.45)^6+1111854.33825836*(((temperature_mean+65.929))/194.45)^5-337069.883250001*(((temperature_mean+65.929))/194.45)^4+66105.7015922199*(((temperature_mean+65.929))/194.45)^3- 8386.78320604513*(((temperature_mean+65.929))/194.45)^2+ 824.818021779729*(((temperature_mean+65.929))/194.45)-86.7321006757439, temperature_mean)) %>% 
+  mutate(noaa_morrisey = 610558.226380138*(((morrisey+65.929))/194.45)^9-2056177.65461394*(((morrisey+65.929))/194.45)^8+2937046.42906361*(((morrisey+65.929))/194.45)^7-2319657.12916417*(((morrisey+65.929))/194.45)^6+1111854.33825836*(((morrisey+65.929))/194.45)^5-337069.883250001*(((morrisey+65.929))/194.45)^4+66105.7015922199*(((morrisey+65.929))/194.45)^3- 8386.78320604513*(((morrisey+65.929))/194.45)^2+ 824.818021779729*(((morrisey+65.929))/194.45)-86.7321006757439)
+```
+
+
+# mean temperatures w/ corrections:
+
+```{r all temperatures all corrections}
+
+all_annual_temp_adjustments <- snotel_426_adjusted %>% 
+  group_by(waterYear) %>% 
+  mutate(mean_temp_mean = mean(temperature_mean)) %>% 
+  mutate(mean_morri = mean(morrisey)) %>% 
+  mutate(mean_noaa_con = mean(noaa_conus)) %>% 
+  mutate(mean_noaa_morr = mean(noaa_morrisey)) %>% 
+  distinct(waterYear, .keep_all = TRUE)
+
+ggplot(all_annual_temp_adjustments, aes(x=waterYear)) + 
+  geom_line(aes(y = mean_temp_mean, color = "temperature_mean"), size =1)+
+  geom_line(aes(y = mean_morri, color = "morrisey"), size =1)+
+  geom_line(aes(y = mean_noaa_con, color = "noaa_conus"), size =1)+
+  geom_line(aes(y = mean_noaa_morr, color= "noaa_morrisey"), size =1)+
+  geom_smooth(aes(x=waterYear, y = mean_temp_mean, color = "temperature_mean"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = mean_morri, color = "morrisey"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = mean_noaa_con, color = "noaa_conus"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = mean_noaa_morr, color= "noaa_morrisey"), method=lm, se=FALSE)+
+  
+  theme_few()+
+  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red"))+
+  xlab("Water Year")+
+  ylab("Mean annual temperature °C")
+
+```
+
+
+
+
+# 1:1
+```{r one-to-one}
+
+ggplot(snotel_426_adjusted, aes(x = temperature_mean, y = noaa_conus)) + 
+  geom_point() +
+  theme_few() +
+  coord_equal() +
+  geom_abline(slope=1, intercept=0, color= "red", size = 0.7) +
+  geom_smooth(method = "lm", se=FALSE) +
+  ylab('temperature_mean (°C)') + 
+  xlab('noaa_conus')
+
+
+
+```
+
+```{r save for SF}
+
+snotel_426_adjusted
+
+write.csv(snotel_426_adjusted,"C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_clean/snotel_426_adjusted.csv", row.names = FALSE) 
+```
+
+#### 426 Detrended for temperature_mean
+
+```{r 426 detrend for temperature mean}
+
+#average water year temperature
+yearly_wy_aver_426 <- snotel_426_adjusted %>% 
+  group_by(waterYear) %>% 
+  mutate(aver_ann_temp = mean(temperature_mean))
+#Average temperature by day for all water years:
+daily_wy_aver_426 <- yearly_wy_aver_426 %>% 
+  group_by(daymonth) %>% 
+  mutate(aver_day_temp = mean(temperature_mean))
+#average mean temperature by day for the period of record:
+daily_wy_aver_426 <- daily_wy_aver_426 %>% 
+  group_by(daymonth) %>% 
+  mutate(all_ave_temp = mean(daily_wy_aver_426$aver_day_temp))
+# try to show all years as means. 
+daily_wy_aver2_426 <-daily_wy_aver_426 %>% 
+  group_by(waterDay) %>%
+  mutate(date_temp = mean(temperature_mean))
+  
+daily_wy_aver2_426$date_temp <- (daily_wy_aver2_426$date_temp) #reduce the sig figs
+ggplot(daily_wy_aver2_426, aes(x = waterDay, y = date_temp))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  ylab('Average Daily temperature (°C)') + 
+  xlab('Day of water year')
+```
+
+#### 426 temperature_mean SD 
+
+```{r 426 SD}
+
+standard_dev_426 <- daily_wy_aver_426 %>% 
+  group_by(waterYear) %>% 
+  mutate(residual = (all_ave_temp-aver_ann_temp)+temperature_mean-aver_day_temp) %>% 
+  mutate(deviation = abs(residual-lag(residual)))
+standard_dev_all_426 <- standard_dev_426 %>% 
+  group_by(waterYear) %>% 
+  mutate(nmbr = n())
+standard_dev_all_426 <- standard_dev_all_426 %>% 
+  group_by(waterYear) %>% 
+  mutate(resid_mean = mean(residual)) %>%
+  mutate(sd_1 = residual-resid_mean) %>% 
+  mutate(sd_2 = (((sum((sd_1)^2))/((nmbr-1))))^(0.5)) %>%
+  distinct(sd_2, .keep_all = TRUE) %>% 
+   select(waterYear, sd_2)
+standard_dev_all_426 %>% 
+  kable(.,'html') %>%
+  kable_styling() %>%
+  scroll_box(width='250px',height='500px')
+ggplot(standard_dev_all_426, aes(x = waterYear, y = sd_2))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  geom_smooth(method = "lm", se=FALSE) +
+  ylab('SD') + 
+  xlab('Water year')
+```
+
+*Non-corrected standard deviation of SNOTEL 426 average temperatures for water years 2005-2021* 
+
+
+#### MK & SS for 426 (non-corrected)
+
+```{r 426 sd mk & ss non corrected}
+sd_mk_426 <- mk.test(standard_dev_all_426$sd_2)
+print(sd_mk_426)
+sd_sens_426 <- sens.slope(standard_dev_all_426$sd_2)
+print(sd_sens_426)
+```
+
+
+#### 426 Morrisey corrected
+
+```{r 426 detrend Morrisey adjusted}
+#using the clean culled df:
+#average water year temperature
+yearly_wy_aver_426_morrisey <- snotel_426_adjusted %>% 
+  group_by(waterYear) %>% 
+  mutate(aver_ann_temp_morrisey = mean(morrisey))
+#Average temperature by day for all water years:
+daily_wy_aver_426_morrisey <- yearly_wy_aver_426_morrisey %>% 
+  group_by(daymonth) %>% 
+  mutate(aver_day_temp_morrisey = mean(morrisey))
+#average mean temperature by day for the period of record:
+daily_wy_aver_426_morrisey <- daily_wy_aver_426_morrisey %>% 
+  group_by(daymonth) %>% 
+  mutate(all_ave_temp_morrisey = mean(daily_wy_aver_426_morrisey$aver_day_temp_morrisey))
+# try to show all years as means. 
+daily_wy_aver2_426_morrisey <-daily_wy_aver_426_morrisey %>% 
+  group_by(waterDay) %>%
+  mutate(date_temp_morrisey = mean(morrisey))
+  
+daily_wy_aver2_426_morrisey$date_temp_morrisey <- signif(daily_wy_aver2_426_morrisey$date_temp_morrisey,3) #reduce the sig figs
+ggplot(daily_wy_aver2_426_morrisey, aes(x = waterDay, y = date_temp_morrisey))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  ylab('Average Daily temperature (°C)') + 
+  xlab('Day of water year')
+```
+
+#### 426 SS (Morrisey corrected)
+
+```{r 426 SD Morrisey adjusted}
+standard_dev_426_morrisey <- daily_wy_aver_426_morrisey %>% 
+  group_by(waterYear) %>% 
+  #filter(waterYear >= 1987 & waterYear <= 2021) %>% 
+  mutate(residual = (all_ave_temp_morrisey-aver_ann_temp_morrisey)+morrisey-aver_day_temp_morrisey) %>% 
+  mutate(deviation = abs(residual-lag(residual)))
+standard_dev_all_426_morrisey <- standard_dev_426_morrisey %>% 
+  group_by(waterYear) %>% 
+  mutate(nmbr = n())
+standard_dev_all_426_morrisey <- standard_dev_all_426_morrisey %>% 
+  group_by(waterYear) %>% 
+  mutate(resid_mean = mean(residual)) %>%
+  mutate(sd_1 = residual-resid_mean) %>% 
+  mutate(sd_2 = (((sum((sd_1)^2))/((nmbr-1))))^(0.5)) %>%
+  distinct(sd_2, .keep_all = TRUE) %>% 
+   select(waterYear, sd_2)
+standard_dev_all_426_morrisey %>% 
+  kable(.,'html') %>%
+  kable_styling() %>%
+  scroll_box(width='250px',height='500px')
+ggplot(standard_dev_all_426_morrisey, aes(x = waterYear, y = sd_2))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  geom_smooth(method = "lm", se=FALSE) +
+  ylab('SD') + 
+  xlab('Water year')
+```
+
+*Morrisey-corrected standard deviation of SNOTEL 426 average temperatures for water years 1986-2021* 
+
+
+#### MK & SS 426 (Morrisey corrected)
+
+```{r 426 sd mk & ss Morrisey adjusted}
+sd_mk_426_morrisey <- mk.test(standard_dev_all_426_morrisey$sd_2)
+print(sd_mk_426_morrisey)
+sd_sens_426_morrisey <- sens.slope(standard_dev_all_426_morrisey$sd_2)
+print(sd_sens_426_morrisey)
+```
+
+#### 426 noaa_conus
+
+
+#### 426 noaa_conus corrected
+
+```{r 426 detrend noaa_conus adjusted}
+#using the clean culled df:
+#average water year temperature
+yearly_wy_aver_426_noaa_conus <- snotel_426_adjusted %>% 
+  group_by(waterYear) %>% 
+  mutate(aver_ann_temp_noaa_conus = mean(noaa_conus))
+#Average temperature by day for all water years:
+daily_wy_aver_426_noaa_conus <- yearly_wy_aver_426_noaa_conus %>% 
+  group_by(daymonth) %>% 
+  mutate(aver_day_temp_noaa_conus = mean(noaa_conus))
+#average mean temperature by day for the period of record:
+daily_wy_aver_426_noaa_conus <- daily_wy_aver_426_noaa_conus %>% 
+  group_by(daymonth) %>% 
+  mutate(all_ave_temp_noaa_conus = mean(daily_wy_aver_426_noaa_conus$aver_day_temp_noaa_conus))
+# try to show all years as means. 
+daily_wy_aver2_426_noaa_conus <-daily_wy_aver_426_noaa_conus %>% 
+  group_by(waterDay) %>%
+  mutate(date_temp_noaa_conus = mean(noaa_conus))
+  
+daily_wy_aver2_426_noaa_conus$date_temp_noaa_conus <- signif(daily_wy_aver2_426_noaa_conus$date_temp_noaa_conus,3) #reduce the sig figs
+ggplot(daily_wy_aver2_426_noaa_conus, aes(x = waterDay, y = date_temp_noaa_conus))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  ylab('Average Daily temperature (°C)') + 
+  xlab('Day of water year')
+```
+
+#### 426 SS (noaa_conus corrected)
+
+```{r 426 SD noaa_conus adjusted}
+standard_dev_426_noaa_conus <- daily_wy_aver_426_noaa_conus %>% 
+  group_by(waterYear) %>% 
+  #filter(waterYear >= 1987 & waterYear <= 2021) %>% 
+  mutate(residual = (all_ave_temp_noaa_conus-aver_ann_temp_noaa_conus)+noaa_conus-aver_day_temp_noaa_conus) %>% 
+  mutate(deviation = abs(residual-lag(residual)))
+standard_dev_all_426_noaa_conus <- standard_dev_426_noaa_conus %>% 
+  group_by(waterYear) %>% 
+  mutate(nmbr = n())
+standard_dev_all_426_noaa_conus <- standard_dev_all_426_noaa_conus %>% 
+  group_by(waterYear) %>% 
+  mutate(resid_mean = mean(residual)) %>%
+  mutate(sd_1 = residual-resid_mean) %>% 
+  mutate(sd_2 = (((sum((sd_1)^2))/((nmbr-1))))^(0.5)) %>%
+  distinct(sd_2, .keep_all = TRUE) %>% 
+   select(waterYear, sd_2)
+standard_dev_all_426_noaa_conus %>% 
+  kable(.,'html') %>%
+  kable_styling() %>%
+  scroll_box(width='250px',height='500px')
+ggplot(standard_dev_all_426_noaa_conus, aes(x = waterYear, y = sd_2))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  geom_smooth(method = "lm", se=FALSE) +
+  ylab('SD') + 
+  xlab('Water year')
+```
+
+*NOAA-CONUS corrected standard deviation of SNOTEL 426 average temperatures for water years 1986-2021* 
+
+
+#### MK & SS 426 (noaa_conus corrected)
+
+```{r 426 sd mk & ss noaa_conus adjusted}
+sd_mk_426_noaa_conus <- mk.test(standard_dev_all_426_noaa_conus$sd_2)
+print(sd_mk_426_noaa_conus)
+sd_sens_426_noaa_conus <- sens.slope(standard_dev_all_426_noaa_conus$sd_2)
+print(sd_sens_426_noaa_conus)
+```
+
+#### 426 noaa_morrisey
+
+
+#### 426 noaa_morrisey corrected
+
+```{r 426 detrend noaa_morrisey adjusted}
+#using the clean culled df:
+#average water year temperature
+yearly_wy_aver_426_noaa_morrisey <- snotel_426_adjusted %>% 
+  group_by(waterYear) %>% 
+  mutate(aver_ann_temp_noaa_morrisey = mean(noaa_morrisey))
+#Average temperature by day for all water years:
+daily_wy_aver_426_noaa_morrisey <- yearly_wy_aver_426_noaa_morrisey %>% 
+  group_by(daymonth) %>% 
+  mutate(aver_day_temp_noaa_morrisey = mean(noaa_morrisey))
+#average mean temperature by day for the period of record:
+daily_wy_aver_426_noaa_morrisey <- daily_wy_aver_426_noaa_morrisey %>% 
+  group_by(daymonth) %>% 
+  mutate(all_ave_temp_noaa_morrisey = mean(daily_wy_aver_426_noaa_morrisey$aver_day_temp_noaa_morrisey))
+# try to show all years as means. 
+daily_wy_aver2_426_noaa_morrisey <-daily_wy_aver_426_noaa_morrisey %>% 
+  group_by(waterDay) %>%
+  mutate(date_temp_noaa_morrisey = mean(noaa_morrisey))
+  
+daily_wy_aver2_426_noaa_morrisey$date_temp_noaa_morrisey <- signif(daily_wy_aver2_426_noaa_morrisey$date_temp_noaa_morrisey,3) #reduce the sig figs
+ggplot(daily_wy_aver2_426_noaa_morrisey, aes(x = waterDay, y = date_temp_noaa_morrisey))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  ylab('Average Daily temperature (°C)') + 
+  xlab('Day of water year')
+```
+
+#### 426 SS (noaa_morrisey corrected)
+
+```{r 426 SD noaa_morrisey adjusted}
+standard_dev_426_noaa_morrisey <- daily_wy_aver_426_noaa_morrisey %>% 
+  group_by(waterYear) %>% 
+  #filter(waterYear >= 1987 & waterYear <= 2021) %>% 
+  mutate(residual = (all_ave_temp_noaa_morrisey-aver_ann_temp_noaa_morrisey)+noaa_morrisey-aver_day_temp_noaa_morrisey) %>% 
+  mutate(deviation = abs(residual-lag(residual)))
+standard_dev_all_426_noaa_morrisey <- standard_dev_426_noaa_morrisey %>% 
+  group_by(waterYear) %>% 
+  mutate(nmbr = n())
+standard_dev_all_426_noaa_morrisey <- standard_dev_all_426_noaa_morrisey %>% 
+  group_by(waterYear) %>% 
+  mutate(resid_mean = mean(residual)) %>%
+  mutate(sd_1 = residual-resid_mean) %>% 
+  mutate(sd_2 = (((sum((sd_1)^2))/((nmbr-1))))^(0.5)) %>%
+  distinct(sd_2, .keep_all = TRUE) %>% 
+   select(waterYear, sd_2)
+standard_dev_all_426_noaa_morrisey %>% 
+  kable(.,'html') %>%
+  kable_styling() %>%
+  scroll_box(width='250px',height='500px')
+ggplot(standard_dev_all_426_noaa_morrisey, aes(x = waterYear, y = sd_2))+
+  geom_line(size= 0.7) +
+  theme_few() +
+  geom_smooth(method = "lm", se=FALSE) +
+  ylab('SD') + 
+  xlab('Water year')
+```
+
+*NOAA-CONUS over Morrisey corrected standard deviation of SNOTEL 426 average temperatures for water years 1986-2021* 
+
+
+#### MK & SS 426 (noaa_morrisey corrected)
+
+```{r 426 sd mk & ss noaa_morrisey adjusted}
+sd_mk_426_noaa_morrisey <- mk.test(standard_dev_all_426_noaa_morrisey$sd_2)
+print(sd_mk_426_noaa_morrisey)
+sd_sens_426_noaa_morrisey <- sens.slope(standard_dev_all_426_noaa_morrisey$sd_2)
+print(sd_sens_426_noaa_morrisey)
+```
+
+
+
+
+# Figure SD all together
+
+
+```{r all SD together}
+
+all_adjustments <- standard_dev_all_426_noaa_morrisey %>% 
+  inner_join(standard_dev_all_426_noaa_conus, by= 'waterYear') %>% 
+  left_join(standard_dev_all_426_morrisey, by= 'waterYear') %>% 
+  left_join(standard_dev_all_426, by= 'waterYear') %>% 
+  rename(noaa_morrisey = sd_2.x) %>% 
+  rename(noaa_conus = sd_2.y) %>%
+  rename(morrisey = sd_2.x.x) %>%
+  rename(temperature_mean = sd_2.y.y)
+
+
+
+
+ggplot(all_adjustments, aes(x=waterYear)) +  
+         #scale_size_manual(values=c("FALSE"=5,"TRUE"=8)) +
+  #scale_color_manual(values=c("FALSE"='#CC0000',"TRUE"='black')) +
+geom_line(aes(y = temperature_mean, color = "temperature_mean"), size =1)+
+  geom_line(aes(y = morrisey, color = "morrisey"), size =1)+
+  geom_line(aes(y = noaa_conus, color = "noaa_conus"), size =1)+
+  geom_line(aes(y = noaa_morrisey, color= "noaa_morrisey"), size =1)+
+  geom_smooth(aes(x=waterYear, y = temperature_mean, color = "temperature_mean"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = morrisey, color = "morrisey"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = noaa_conus, color = "noaa_conus"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = noaa_morrisey, color= "noaa_morrisey"), method=lm, se=FALSE)+
+  
+  theme_few()+
+  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red"))+
+  xlab("Water Year")+
+  ylab("Standard Deviation °C")
+
+
+# breaks=c("date_temp.x","date_temp.y","date_temp.x.x", "date_temp.y.y"), 
+```
+
+SF question: Why doesn't Morrisey directly follow the mean temperature? *The detrending process uses the mean of the period of record as well as the mean day-of-water year temperature, both of which affect the standard deviation for each water year. Applying a bias correction will change the mean of the period of record and the mean day-of-water year temperature, so even if the mean temperature values are the same after the temperature sensor change there will still be some difference between the annual standard deviation values.*
+
+```{r AVERAGE ANNUAL TEMPS, eval=FALSE, include=FALSE}
+
+# average annual temps for all correctsion:
+# data frames without SD:
+
+# daily_wy_aver2_426_noaa_morrisey
+
+ggplot(daily_wy_aver2_426_morrisey, aes(x=waterYear, y= temperature_mean))+
+  geom_point()+
+  geom_smooth(method = "lm", se=FALSE)+
+  theme_few()
+
+
+ggplot(daily_wy_aver2_426_morrisey, aes(x=waterYear, y= aver_ann_temp_morrisey))+
+  geom_point()+
+  geom_smooth(method = "lm", se=FALSE)+
+  theme_few()
+
+
+ggplot(daily_wy_aver2_426_noaa_conus, aes(x=waterYear, y= aver_ann_temp_noaa_conus))+
+  geom_point()+
+  geom_smooth(method = "lm", se=FALSE)+
+  theme_few()
+
+
+ggplot(daily_wy_aver2_426_noaa_morrisey, aes(x=waterYear, y= aver_ann_temp_noaa_morrisey))+
+  geom_point()+
+  geom_smooth(method = "lm", se=FALSE)+
+  theme_few()
+
+# want them all together though. 
+```
