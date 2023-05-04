@@ -686,7 +686,7 @@ Oyler_SD_NOAA_CONUS <- read.csv("C:/Users/13074/Documents/ESS580/thesis_project/
 # All datasets mean temperature
 
 
-```{r mean annual temp figure + Oyler, fig.cap= "Mean annual temperature by correction."}
+```{r mean annual temp figure + Oyler NO OYLER-CONUS, fig.cap= "Mean annual temperature by correction."}
 
 Oyler_mean <- Oyler_annual_temp_adjustments %>% 
   select(waterYear, mean_temp_mean, mean_noaa_con)
@@ -705,15 +705,15 @@ ggplot(all_annual_temp_adjustments_Oyler, aes(x=waterYear)) +
   geom_line(aes(y = mean_noaa_con, color = "noaa_conus"), size =1)+
   geom_line(aes(y = mean_noaa_morr, color= "noaa_morrisey"), size =1)+
   geom_line(aes(y = oyler, color= "oyler"), size =1)+
-  geom_line(aes(y = oyler_noaa_conus, color= "oyler_noaa_conus"), size =1)+
+  #geom_line(aes(y = oyler_noaa_conus, color= "oyler_noaa_conus"), size =1)+
   geom_smooth(aes(x=waterYear, y = mean_temp_mean, color = "temperature_mean"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = mean_morri, color = "morrisey"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = mean_noaa_con, color = "noaa_conus"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = mean_noaa_morr, color= "noaa_morrisey"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = oyler, color= "oyler"), method=lm, se=FALSE)+
-  geom_smooth(aes(x=waterYear, y = oyler_noaa_conus, color= "oyler_noaa_conus"), method=lm, se=FALSE)+
+  #geom_smooth(aes(x=waterYear, y = oyler_noaa_conus, color= "oyler_noaa_conus"), method=lm, se=FALSE)+
   theme_few()+
-  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red", "oyler" = "purple", "oyler_noaa_conus" = "grey"))+
+  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red", "oyler" = "purple"))+#, "oyler_noaa_conus" = "grey"))+
   xlab("Water Year")+
   ylab("Mean annual temperature °C")
 
@@ -721,7 +721,7 @@ ggplot(all_annual_temp_adjustments_Oyler, aes(x=waterYear)) +
 
 # All datasets Standard Deviation
 
-```{r all SD + Oyler, fig.cap= "Standard deviation by correction."}
+```{r all SD + Oyler NO OYLER-CONUS, fig.cap= "Standard deviation by correction."}
 
 all_adjustments_Oyler <- all_adjustments %>% 
   full_join(Oyler_SD, by= 'waterYear') %>%
@@ -735,17 +735,20 @@ geom_line(aes(y = temperature_mean, color = "temperature_mean"), size =1)+
   geom_line(aes(y = noaa_conus, color = "noaa_conus"), size =1)+
   geom_line(aes(y = noaa_morrisey, color= "noaa_morrisey"), size =1)+
   geom_line(aes(y = oyler, color= "oyler"), size =1)+
-  geom_line(aes(y = oyler_noaa_conus, color= "oyler_noaa_conus"), size =1)+
+  #geom_line(aes(y = oyler_noaa_conus, color= "oyler_noaa_conus"), size =1)+
   geom_smooth(aes(x=waterYear, y = temperature_mean, color = "temperature_mean"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = morrisey, color = "morrisey"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = noaa_conus, color = "noaa_conus"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = noaa_morrisey, color= "noaa_morrisey"), method=lm, se=FALSE)+
   geom_smooth(aes(x=waterYear, y = oyler, color= "oyler"), method=lm, se=FALSE)+
-  geom_smooth(aes(x=waterYear, y = oyler_noaa_conus, color= "oyler_noaa_conus"), method=lm, se=FALSE)+
+  #geom_smooth(aes(x=waterYear, y = oyler_noaa_conus, color= "oyler_noaa_conus"), method=lm, se=FALSE)+
   theme_few()+
-  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red", "oyler" = "purple", "oyler_noaa_conus" = "grey"))+
+  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red", "oyler" = "purple"))+#, "oyler_noaa_conus" = "grey"))+
   xlab("Water Year")+
   ylab("Standard Deviation °C")
 
 ```
 
+# Meeting 5/4/2023
+
+As the Oyler data is interpolated/extrapolated, there is no point in applying the NOAA-CONUS correction. I'm commenting out the adjustment from the figures above.
