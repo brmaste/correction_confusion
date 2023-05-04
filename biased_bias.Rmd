@@ -65,11 +65,9 @@ In R script: T(adjusted) = 5.3x10^(-7)xT(old)^4+3.72x10^(-5)xT(old)^3-2.16x10^(-
 **In the Ma et al. spreadsheet, H1 is Morrisey, H2 is Oiler**
 
 # 4/24/2023 update
-Including YSI temperature sensor bias equation from Joel Atwood at the Colorado Snow Survey, presented at the 2023 Western Snow Conference. Associated website [here.](https://www.nrcs.usda.gov/wps/portal/wcc/home/snowClimateMonitoring/temperature/temperatureBiasCorrection/)
+Including YSI temperature sensor bias equation from the Colorado Snow Survey, presented at the 2023 Western Snow Conference. Associated website [here.](https://www.nrcs.usda.gov/wps/portal/wcc/home/snowClimateMonitoring/temperature/temperatureBiasCorrection/)
 
-```{r conditional_block, echo=FALSE}
-print("610558.226380138*(((T_(bias-c)+65.929))/194.45)^9- 2056177.65461394*(((T_(bias-c)+65.929))/194.45)^8+ 2937046.42906361*(((T_(bias-c)+65.929))/194.45)^7-2319657.12916417*(((T_(bias-c)+65.929))/194.45)^6+1111854.33825836*(((T_(bias-c)+65.929))/194.45)^5-337069.883250001*(((T_(bias-c)+65.929))/194.45)^4+66105.7015922199*(((T_(bias-c)+65.929))/194.45)^3- 8386.78320604513*(((T_(bias-c)+65.929))/194.45)^2+ 824.818021779729*(((T_(bias-c)+65.929))/194.45)-86.7321006757439= T_c")
-```
+$610558.226380138*(((T_(bias-c)+65.929))/194.45)^9- 2056177.65461394*(((T_(bias-c)+65.929))/194.45)^8+ 2937046.42906361*(((T_(bias-c)+65.929))/194.45)^7-2319657.12916417*(((T_(bias-c)+65.929))/194.45)^6+1111854.33825836*(((T_(bias-c)+65.929))/194.45)^5-337069.883250001*(((T_(bias-c)+65.929))/194.45)^4+66105.7015922199*(((T_(bias-c)+65.929))/194.45)^3- 8386.78320604513*(((T_(bias-c)+65.929))/194.45)^2+ 824.818021779729*(((T_(bias-c)+65.929))/194.45)-86.7321006757439= T_c$
 
 # Corrections
 
@@ -89,7 +87,7 @@ SNOTEL_426 <- snotel_download(site_id = 426, path = tempdir('../data'), internal
 write.csv(SNOTEL_426,"C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_raw/snotel_426.csv", row.names = FALSE) #write in the raw data
 ```
 
-```{r Crosho read in}
+```{r Crosho read in, echo=TRUE}
 snotel_426 <- read.csv("C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_raw/snotel_426.csv", header = TRUE)
 ```
 
@@ -251,7 +249,7 @@ snotel_426_adjusted <- snotel_426_clean_culled %>%
 
 # mean temperatures w/ corrections:
 
-```{r all temperatures all corrections}
+```{r all temperatures all corrections, fig.cap= "Annual temperature by correction." }
 
 all_annual_temp_adjustments <- snotel_426_adjusted %>% 
   group_by(waterYear) %>% 
@@ -282,7 +280,7 @@ ggplot(all_annual_temp_adjustments, aes(x=waterYear)) +
 
 
 # 1:1
-```{r one-to-one}
+```{r one-to-one, fig.cap= "Mean daily temperature vs. NOAA-CONUS bias correction."}
 
 ggplot(snotel_426_adjusted, aes(x = temperature_mean, y = noaa_conus)) + 
   geom_point() +
@@ -297,7 +295,7 @@ ggplot(snotel_426_adjusted, aes(x = temperature_mean, y = noaa_conus)) +
 
 ```
 
-```{r save for SF}
+```{r save for SF, echo=TRUE}
 
 snotel_426_adjusted
 
@@ -601,7 +599,7 @@ print(sd_sens_426_noaa_morrisey)
 # Figure SD all together
 
 
-```{r all SD together}
+```{r all SD together, fig.cap= "Standard deviation for different corrections."}
 
 all_adjustments <- standard_dev_all_426_noaa_morrisey %>% 
   inner_join(standard_dev_all_426_noaa_conus, by= 'waterYear') %>% 
@@ -636,7 +634,7 @@ geom_line(aes(y = temperature_mean, color = "temperature_mean"), size =1)+
 # breaks=c("date_temp.x","date_temp.y","date_temp.x.x", "date_temp.y.y"), 
 ```
 
-SF question: Why doesn't Morrisey directly follow the mean temperature? *The detrending process uses the mean of the period of record as well as the mean day-of-water year temperature, both of which affect the standard deviation for each water year. Applying a bias correction will change the mean of the period of record and the mean day-of-water year temperature, so even if the mean temperature values are the same after the temperature sensor change there will still be some difference between the annual standard deviation values.*
+Question: Why doesn't Morrisey directly follow the mean temperature? *The detrending process uses the mean of the period of record as well as the mean day-of-water year temperature, both of which affect the standard deviation for each water year. Applying a bias correction will change the mean of the period of record and the mean day-of-water year temperature, so even if the mean temperature values are the same after the temperature sensor change there will still be some difference between the annual standard deviation values.*
 
 ```{r AVERAGE ANNUAL TEMPS, eval=FALSE, include=FALSE}
 
@@ -670,3 +668,84 @@ ggplot(daily_wy_aver2_426_noaa_morrisey, aes(x=waterYear, y= aver_ann_temp_noaa_
 
 # want them all together though. 
 ```
+
+# Adding in Oyler data
+
+Using geoknife, I was able to download Oyler TopoWx data for comparison to the other datasets. It's specified above as "3) NRCS pre-sensor change adjusted data (Oyler)." Since Oyler used the YSI extended range sensors to correlate temperature at the SNOTEL stations, it seems likely that applying the NOAA_CONUS bias correction is necessary as well. The data were imported into a different .rmd, with the SNOTEL data water years removed (1988, 1989, 2009, 2021). Since the Oyler data only extends to 2016, the figures below will reflect the shortened Oyler and Oyler-NOAA-CONUS corrected time series.
+
+```{r Oyler data read in, echo=TRUE}
+
+Oyler_annual_temp_adjustments <- read.csv("C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_clean/Oyler_annual_temp_adjustments.csv", header = TRUE)
+
+Oyler_SD <- read.csv("C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_clean/Oyler_standard_dev_all_426.csv", header = TRUE)
+
+Oyler_SD_NOAA_CONUS <- read.csv("C:/Users/13074/Documents/ESS580/thesis_project/correction_confusion/data_clean/Oyler_standard_dev_all_426_noaa_conus.csv", header = TRUE)
+
+```
+
+# All datasets mean temperature
+
+
+```{r mean annual temp figure + Oyler, fig.cap= "Mean annual temperature by correction."}
+
+Oyler_mean <- Oyler_annual_temp_adjustments %>% 
+  select(waterYear, mean_temp_mean, mean_noaa_con)
+
+all_annual_temp_adjustments_Oyler <- all_annual_temp_adjustments %>%
+  select(waterYear, mean_temp_mean, mean_morri, mean_noaa_con, mean_noaa_morr) %>% 
+  full_join(Oyler_mean, by= 'waterYear') %>%
+  rename(mean_temp_mean = mean_temp_mean.x) %>% 
+  rename(mean_noaa_con = mean_noaa_con.x) %>% 
+  rename(oyler = mean_temp_mean.y) %>% 
+  rename(oyler_noaa_conus = mean_noaa_con.y)
+
+ggplot(all_annual_temp_adjustments_Oyler, aes(x=waterYear)) + 
+  geom_line(aes(y = mean_temp_mean, color = "temperature_mean"), size =1)+
+  geom_line(aes(y = mean_morri, color = "morrisey"), size =1)+
+  geom_line(aes(y = mean_noaa_con, color = "noaa_conus"), size =1)+
+  geom_line(aes(y = mean_noaa_morr, color= "noaa_morrisey"), size =1)+
+  geom_line(aes(y = oyler, color= "oyler"), size =1)+
+  geom_line(aes(y = oyler_noaa_conus, color= "oyler_noaa_conus"), size =1)+
+  geom_smooth(aes(x=waterYear, y = mean_temp_mean, color = "temperature_mean"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = mean_morri, color = "morrisey"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = mean_noaa_con, color = "noaa_conus"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = mean_noaa_morr, color= "noaa_morrisey"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = oyler, color= "oyler"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = oyler_noaa_conus, color= "oyler_noaa_conus"), method=lm, se=FALSE)+
+  theme_few()+
+  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red", "oyler" = "purple", "oyler_noaa_conus" = "grey"))+
+  xlab("Water Year")+
+  ylab("Mean annual temperature °C")
+
+```
+
+# All datasets Standard Deviation
+
+```{r all SD + Oyler, fig.cap= "Standard deviation by correction."}
+
+all_adjustments_Oyler <- all_adjustments %>% 
+  full_join(Oyler_SD, by= 'waterYear') %>%
+  rename(oyler = sd_2) %>%
+  left_join(Oyler_SD_NOAA_CONUS, by = "waterYear") %>% 
+  rename(oyler_noaa_conus = sd_2)
+
+ggplot(all_adjustments_Oyler, aes(x=waterYear)) +
+geom_line(aes(y = temperature_mean, color = "temperature_mean"), size =1)+
+  geom_line(aes(y = morrisey, color = "morrisey"), size =1)+
+  geom_line(aes(y = noaa_conus, color = "noaa_conus"), size =1)+
+  geom_line(aes(y = noaa_morrisey, color= "noaa_morrisey"), size =1)+
+  geom_line(aes(y = oyler, color= "oyler"), size =1)+
+  geom_line(aes(y = oyler_noaa_conus, color= "oyler_noaa_conus"), size =1)+
+  geom_smooth(aes(x=waterYear, y = temperature_mean, color = "temperature_mean"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = morrisey, color = "morrisey"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = noaa_conus, color = "noaa_conus"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = noaa_morrisey, color= "noaa_morrisey"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = oyler, color= "oyler"), method=lm, se=FALSE)+
+  geom_smooth(aes(x=waterYear, y = oyler_noaa_conus, color= "oyler_noaa_conus"), method=lm, se=FALSE)+
+  theme_few()+
+  scale_colour_manual(name = "Adjustments", values=c("temperature_mean"="orange", "morrisey" = "darkgreen", "noaa_conus" ="blue", "noaa_morrisey" = "red", "oyler" = "purple", "oyler_noaa_conus" = "grey"))+
+  xlab("Water Year")+
+  ylab("Standard Deviation °C")
+
+```
+
